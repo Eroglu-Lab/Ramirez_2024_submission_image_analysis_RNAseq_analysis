@@ -1,0 +1,152 @@
+---
+title: "Juan_Invitro_Microglia_Hevin_BatchAnalysis"
+author: "Krissy"
+date: "March 25, 2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(edgeR)
+library(ggplot2)
+library(pheatmap)
+library(stringr)
+library(RColorBrewer)
+library(tidyverse)
+```
+
+```{r read in data and organize factors}
+samples <- list.files('D:/Juan_Microglia_HevinLPS/', pattern='.txt$')
+samples <- gsub('_counts.txt', '', samples)
+condition <- str_match(samples, '\\d\\_(\\w+)')[,2]
+
+factorData <- data.frame(samples, condition)
+factorData$countFile <- paste0('D:/Juan_Microglia_HevinLPS/', 
+                              list.files('D:/Juan_Microglia_HevinLPS/', pattern='.txt$'))
+countList <- lapply(factorData$countFile, function(x) read.table(x, header=T))
+names(countList) <- factorData$samples
+
+#renames count column to something cleaner ['sample_counts']
+for (i in 1:length(countList)){
+  names(countList[[i]])[7] <- paste(factorData$samples[i], '_counts', sep='')
+}
+
+#bind all columns from the count matrices, with only one column of geneIDs
+##this works because every count file has the same list of genes (all mm10 genes, 24421)
+countMatrix <- cbind(countList[[1]][,c(1,7)])
+for (i in 2:length(countList)){
+  y <- countList[[i]][,7]
+  countMatrix <- cbind(countMatrix, y)
+  names(countMatrix)[i+1] <- colnames(countList[[i]])[7]
+}
+
+#make the dataframe into a proper matrix for edgeR import.
+row.names(countMatrix) <- countMatrix[,1]
+countMatrix <- as.matrix(countMatrix[,c(2:ncol(countMatrix))])
+```
+
+```{r start edgeR differential expression}
+dge <- DGEList(counts=countMatrix, samples=factorData$samples, group=factorData$condition, genes=row.names(countMatrix))
+
+#inspect object
+head(dge$counts)
+head(dge$samples)
+```
+
+```{r filter DGE}
+keep <- filterByExpr(dge) #this function keeps rows that have at least two samples 
+sum(keep) #number of kept genes
+dge <- dge[keep, ,keep.lib.sizes=F]
+dge$samples$lib.size <- colSums(dge$counts) #recalculate library sizes
+
+dge <- calcNormFactors(dge)
+dge$samples #the norm.factors variable is very close to 1 indicating that a small numbers of genes does not represent any 1 library.
+```
+
+```{r sample clustering }
+#first, calculate logCPM (better than clustering raw counts)
+dge$logcpm <- cpm(dge, log=T)
+
+#add gene lengths to dge
+gene_length <- countList[[1]][,'Length']
+dge$gene_length <- gene_length[keep]
+dge$rpkm <- rpkm(dge, gene.length=dge$gene_length)
+
+#Next, plot MDS
+plotMDS(dge, labels=dge$samples$group, col=as.numeric(dge$samples$group))
+plotMDS(dge, col=as.numeric(dge$samples$group))
+#note: Hevin and Media are clustered with each other in pairs. Groups 4 and 5 cluster together and Groups 6 and 7 cluster together, regardless of treatment
+```
+
+```{r build and run model}
+#groups 4 and 5 were prepared together and groups 6 and 7 were prepared together
+dge$samples$batch <- c(rep(1, times=6), rep(2, times=6))
+
+design <- model.matrix(~0+group+batch, data=dge$samples)
+dge <- estimateDisp(dge, design) #we can only use the qCML (quantile adjusted conditional maximum likelihood method) for one factor designs
+
+#Plot Biological Coefficient of Variation (an estimate of the negative binomial model dispersion)
+plotBCV(dge) #common dispersion is quite low, 0.1 which is great.
+
+#Here, we will use the exact test which is only applicable to single factor experiments
+fit <- glmQLFit(dge, design)
+
+contrasts <- makeContrasts(
+  HevinvMedia = groupHevin - groupMedia,
+  LPSvMedia = groupLPS - groupMedia,
+  levels=design
+)
+
+results.Hevin <- glmQLFTest(fit, contrast = contrasts[,"HevinvMedia"])
+results.LPS <- glmQLFTest(fit, contrast = contrasts[,"LPSvMedia"])
+
+
+```
+
+```{r organize output}
+results.all <- cbind(results.Hevin$table,results.LPS$table)
+comparisons <- c(rep('Hevin', times=4), rep('LPS', times=4))
+names(results.all) <- paste(comparisons,names(results.all), sep='_')
+results.all$Hevin_adjP <- p.adjust(results.all$Hevin_PValue, method='BH')
+results.all$LPS_adjP <- p.adjust(results.all$LPS_PValue, method='BH')
+
+#how many significant genes after correction
+nrow(results.all[results.all$Hevin_adjP < 0.05, ])
+nrow(results.all[results.all$LPS_adjP < 0.05, ])
+
+results.rpkm <- cbind(results.all, dge$rpkm)
+results.rpkm <- results.rpkm[, c(1:4,9, 5:8,10, 11:22)]
+
+```
+
+
+```{r heatmaps}
+#heatmap of scaled FPKM for any gene that is significant in either comparison
+pheatmap(results.rpkm[results.rpkm$Hevin_adjP < 0.05 | results.rpkm$LPS_adjP < 0.05, 11:22], 
+         color = colorRampPalette(rev(brewer.pal(n = 7, name ="PRGn")))(100),
+         scale="row", cluster_cols = T,
+         show_rownames=FALSE)
+
+```
+
+```{r volcano plots}
+
+results.rpkm$Hevinsig <- 'NO'
+results.rpkm$Hevinsig[results.rpkm$Hevin_logFC >0.69 & results.rpkm$Hevin_adjP < 0.05] <- 'UP'
+results.rpkm$Hevinsig[results.rpkm$Hevin_logFC < -0.69 & results.rpkm$Hevin_adjP < 0.05] <- 'DOWN'
+
+ggplot(results.rpkm, aes(x=Hevin_logFC, y=-log10(Hevin_adjP), color=Hevinsig)) + geom_point() + scale_color_manual(values=c('blue', 'grey', 'red')) + geom_hline(yintercept=-log10(0.05)) +  geom_vline(xintercept=c(-0.69, 0.69))
+
+results.rpkm$LPSsig <- 'NO'
+results.rpkm$LPSsig[results.rpkm$LPS_logFC >0.69 & results.rpkm$LPS_adjP < 0.05] <- 'UP'
+results.rpkm$LPSsig[results.rpkm$LPS_logFC < -0.69 & results.rpkm$LPS_adjP < 0.05] <- 'DOWN'
+
+ggplot(results.rpkm, aes(x=LPS_logFC, y=-log10(LPS_adjP), color=LPSsig)) + geom_point() + scale_color_manual(values=c('blue', 'grey', 'red')) + geom_hline(yintercept=-log10(0.05)) +  geom_vline(xintercept=c(-0.69, 0.69))
+```
+
+```{r export data}
+write.csv(results.rpkm, 'D:/Juan_Microglia_HevinLPS/diffExp/BatchEffectAnalysis/20220325_invitro_rnaseq_results_batch.csv')
+```
+
+
+
