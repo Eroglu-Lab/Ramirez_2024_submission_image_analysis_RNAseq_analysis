@@ -1,0 +1,108 @@
+---
+title: "KEGG analysis"
+date: "2024-01-11"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r load libraries, message=FALSE}
+library(tidyverse)
+library(readr)
+library(org.Mm.eg.db)
+library(clusterProfiler)
+library(enrichplot)
+library(msigdbr)
+library(ggVennDiagram)
+library(biomaRt)
+```
+
+Want GO of positive LFC and adjusted pvalue < 0.05
+
+```{r load data}
+combined_data <- read.csv("/Volumes/Argonaut/In-Vitro-RNAseq/WT_Microglia/Pathway_Analysis_Bioconductor/KEGG_Analysis/230302_WT_Invitro_RNAseq_DEA.csv")
+
+```
+
+```{r get ensembl IDs}
+# Get ENTREZ IDs
+# We'll need this for using the "org.Mm.eg.db" package
+# Step One: Connect to the selected BioMart database and dataset hosted by Ensembl
+ensembl <- useEnsembl(biomart = "genes", 
+                   dataset = "mmusculus_gene_ensembl")
+
+#ensembl <- useMart("ENSEMBL_MART_ENSEMBL", host="may2009.archive.ensembl.org", dataset="mmusculus_gene_ensembl")
+
+# Step Two: Retrieve gene names
+# build a biomaRt query
+# The getBM() function is the main query function in biomaRt
+ensembl_to_entrez <- getBM(attributes = c("ensembl_gene_id", "external_gene_name",
+                                            "entrezgene_id"),
+                             values = combined_data$Gene_name,
+                             mart = ensembl)
+
+
+# add this new info to combined_data
+combined_data <- combined_data %>% 
+            left_join(ensembl_to_entrez, by = c("Gene_name" = "external_gene_name"))
+
+# remove rows with NAs in the columns in `ensembl_gene_id``
+combined_data <- combined_data %>% 
+            drop_na(ensembl_gene_id)
+
+# are all ensembl IDs unique?
+length(unique(combined_data$ensembl_gene_id)) 
+nrow(combined_data)
+
+# drop duplicates
+combined_data <- combined_data %>% 
+            distinct(ensembl_gene_id, .keep_all = TRUE)
+
+# are all ensembl IDs unique?
+length(unique(combined_data$ensembl_gene_id)) == nrow(combined_data) # TRUE
+
+```
+
+```{r}
+hevin_up <- filter(combined_data, Hevin_logFC > 0)
+hevin_up <- filter(hevin_up, Hevin_adjP < 0.05)
+
+hevin_up_kegg <- enrichKEGG(gene=as.character(hevin_up$entrezgene_id), organism="mmu", pvalueCutoff=0.05, keyType="ncbi-geneid", use_internal_data = T) # maps gene IDs to gene names
+
+hevin_up_kegg %>% 
+  dotplot(showCategory = 10) + 
+  ggtitle("Hevin upregulated KEGG")
+```
+
+```{r}
+hevin_down <- filter(combined_data, Hevin_logFC < 0)
+hevin_down <- filter(hevin_down, Hevin_adjP < 0.05)
+
+hevin_down_kegg <- enrichKEGG(gene= as.character(hevin_down$entrezgene_id), organism="mmu", pvalueCutoff=0.05, keyType="ncbi-geneid", use_internal_data = T) # maps gene IDs to gene names
+
+hevin_down_kegg %>% 
+  dotplot(showCategory = 10) + 
+  ggtitle("Hevin downregulated KEGG")
+```
+
+```{r}
+lps_up <- filter(combined_data, LPS_logFC > 0)
+lps_up <- filter(lps_up, LPS_adjP < 0.05)
+
+lps_up_kegg <- enrichKEGG(gene= as.character(lps_up$entrezgene_id), organism="mmu", pvalueCutoff=0.05, keyType="ncbi-geneid", use_internal_data = T) # maps gene IDs to gene names
+lps_up_kegg %>% 
+  dotplot(showCategory = 10) + 
+  ggtitle("LPS upregulated KEGG")
+```
+
+```{r}
+lps_down <- filter(combined_data, LPS_logFC < 0)
+lps_down <- filter(lps_down, LPS_adjP < 0.05)
+
+lps_down_kegg <- enrichKEGG(gene= as.character(lps_down$entrezgene_id), organism="mmu", pvalueCutoff=0.05, keyType="ncbi-geneid", use_internal_data = T) # maps gene IDs to gene names
+lps_down_kegg %>% 
+  dotplot(showCategory = 10) + 
+  ggtitle("LPS downregulated KEGG")
+```
