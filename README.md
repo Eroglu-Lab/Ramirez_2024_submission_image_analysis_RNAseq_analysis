@@ -10,7 +10,14 @@ Denoise_restore and Denoise_train*
 Script for running UNet denoising using weight files trained to convert 60X resonant scanner images to galvano quality images on the Olympus FV3000 microscope.
 
 R-markdown:
+
+InVitro_RNAseq_analysis_withBatch
 Reads and counts can be downloaded from the GEO submission: GSE259420
+
+Ramirez_etal_Stratified_RRHO_Analysis
+CSVs with the ranked gene lists can be downloaded from CSV_Stratified_RRHO.zip
+
+
 
 ImageJ macros:
 
