@@ -17,6 +17,8 @@ Reads and counts can be downloaded from the GEO submission: GSE259420
 Ramirez_etal_Stratified_RRHO_Analysis
 CSVs with the ranked gene lists can be downloaded from CSV_Stratified_RRHO.zip
 
+Ramirez_etal_KEGG_analysis
+CSV out of differential expression analysis needed to run script 230302_WT_Invitro_RNAseq_DEA.csv
 
 
 ImageJ macros:
