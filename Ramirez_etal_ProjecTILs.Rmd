@@ -1,0 +1,688 @@
+---
+title: "ProjecTILs_250129"
+output:
+  pdf_document: default
+  html_document: default
+date: "2025-01-29"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r load libraries}
+library(Seurat)
+library(scGate)
+library(ProjecTILs)
+library(Matrix)
+library(ggplot2)
+library(speckle)
+library(limma)
+
+library(schard) #New package to read in .h5ad files. Uses only R so there is no need for reticulate.
+library(patchwork)
+```
+
+```{r read in reference data}
+directory <- '/Volumes/Argonaut/Hevin_OE_SingleCell_RNAseq/Compare_Outside_Data/SCVI_Integrate_public_datasets_250124/ProjectTILs/AnnData_Input/'
+hevin <- schard::h5ad2seurat(paste(directory,'Ramirez_reference.h5ad',sep=''))
+
+hevin <- NormalizeData(hevin, verbose = TRUE)
+hevin <- FindVariableFeatures(hevin, nfeatures=1500, verbose = TRUE)
+
+ndim=20
+seed=1234
+hevin <- ScaleData(hevin, verbose=TRUE)
+hevin <- RunPCA(hevin, features = VariableFeatures(hevin), ndims.print = 1:5, nfeatures.print = 5, npcs = ndim)
+hevin<- RunUMAP(object = hevin, dims = 1:ndim, seed.use = seed)
+
+hevin <- FindNeighbors(hevin, dims=1:10)
+hevin <- FindClusters(hevin, resolution = 0.1)
+
+DimPlot(hevin, group.by='seurat_clusters', label = TRUE, repel = TRUE, label.size = 4) + theme(aspect.ratio = 1) + NoLegend() + ylim(-10,20) + xlim(-20,20)
+
+hevin@meta.data$cell_type <- paste('Cluster',hevin@meta.data$seurat_clusters)
+ref.hevin <- make.reference(ref = hevin, ndim=ndim, seed=seed, recalculate.umap = TRUE, annotation.column='cell_type')
+
+DimPlot(ref.hevin, label = T, repel = T, label.size=4) + theme(aspect.ratio=1) + NoLegend() + ylim(-10,25) + xlim(-15,10)
+
+output = '/Volumes/Argonaut/Hevin_OE_SingleCell_RNAseq/Compare_Outside_Data/SCVI_Integrate_public_datasets_250124/ProjectTILs/Seurat_Output/'
+SaveSeuratRds(ref.hevin, file=paste(output,'Ramirez_reference.Rds',sep=''))
+
+counts <- ref.hevin@assays$RNA@counts
+metadata <- ref.hevin@meta.data
+normalized_counts <- ref.hevin@assays$RNA@data
+
+write.table(as.matrix(GetAssayData(object=ref.hevin, slot = 'counts')), '/Volumes/Argonaut/Hevin_OE_SingleCell_RNAseq/GEO_Submission/Ramirez_counts.csv', sep = ',', row.names = T, col.names = T, quote = F)
+write.table(as.matrix(GetAssayData(object=ref.hevin, slot = 'data')), '/Volumes/Argonaut/Hevin_OE_SingleCell_RNAseq/GEO_Submission/Ramirez_normalized_counts.csv', sep = ',', row.names = T, col.names = T, quote = F)
+write.csv(metadata, file = '/Volumes/Argonaut/Hevin_OE_SingleCell_RNAseq/GEO_Submission/Ramirez_metadata.csv')
+```
+
+```{r Load reference data}
+directory <- '/Volumes/Argonaut/Hevin_OE_SingleCell_RNAseq/Compare_Outside_Data/SCVI_Integrate_public_datasets_250124/ProjectTILs/AnnData_Input/'
+output = '/Volumes/Argonaut/Hevin_OE_SingleCell_RNAseq/Compare_Outside_Data/SCVI_Integrate_public_datasets_250124/ProjectTILs/Seurat_Output/'
+ref.hevin <- readRDS(paste(output,'Ramirez_reference.Rds',sep=''))
+```
+
+## Hammond et al. dataset
+
+```{r read in query data from Hammond et al.}
+
+query_lpc <- schard::h5ad2seurat(paste(directory,'Hammond_LPC.h5ad',sep=''))
+query_lpc.projected <- Run.ProjecTILs(query_lpc, ref = ref.hevin, filter.cell = FALSE)
+
+query_sal <- schard::h5ad2seurat(paste(directory,'Hammond_Saline.h5ad',sep=''))
+query_sal.projected <- Run.ProjecTILs(query_sal, ref = ref.hevin, filter.cell = FALSE)
+
+
+query_e14 <- schard::h5ad2seurat(paste(directory,'Hammond_E14.h5ad',sep=''))
+query_e14.projected <- Run.ProjecTILs(query_e14, ref = ref.hevin, filter.cell = FALSE)
+
+query_p4_5 <- schard::h5ad2seurat(paste(directory,'Hammond_P4-5.h5ad',sep=''))
+query_p4_5.projected <- Run.ProjecTILs(query_p4_5, ref = ref.hevin, filter.cell = FALSE)
+
+query_p30 <- schard::h5ad2seurat(paste(directory,'Hammond_P30.h5ad',sep=''))
+query_p30.projected <- Run.ProjecTILs(query_p30, ref = ref.hevin, filter.cell = FALSE)
+
+query_p100 <- schard::h5ad2seurat(paste(directory,'Hammond_P100.h5ad',sep=''))
+query_p100.projected <- Run.ProjecTILs(query_p100, ref = ref.hevin, filter.cell = FALSE)
+
+query_old <- schard::h5ad2seurat(paste(directory,'Hammond_Old.h5ad',sep=''))
+query_old.projected <- Run.ProjecTILs(query_old, ref = ref.hevin, filter.cell = FALSE)
+
+```
+
+```{r map Hammond et al data onto reference}
+
+lpc <- plot.projection(ref=ref.hevin, query = query_lpc.projected$query, linesize =0.25, pointsize=0.1) + NoLegend() + ggtitle("LPC Projected") + theme(aspect.ratio = 1) + ylim(-10,25) + xlim(-15,10)
+lpc_b<- plot.statepred.composition(ref.hevin, query_lpc.projected$query, labels.col = 'functional.cluster', metric = 'Percent')
+lpc_c<- plot.statepred.composition(ref.hevin, query_lpc.projected$query, labels.col = 'functional.cluster', metric = 'Count')
+
+sal <- plot.projection(ref=ref.hevin, query = query_sal.projected$query, linesize =0.25, pointsize=0.1) + NoLegend() + ggtitle("Saline Projected") + theme(aspect.ratio = 1) + ylim(-10,25) + xlim(-15,10)
+sal_b<- plot.statepred.composition(ref.hevin, query_sal.projected$query, labels.col = 'functional.cluster', metric = 'Percent')
+sal_c<- plot.statepred.composition(ref.hevin, query_sal.projected$query, labels.col = 'functional.cluster', metric = 'Count')
+
+
+e14 <- plot.projection(ref=ref.hevin, query = query_e14.projected$query, linesize =0.25, pointsize=0.1) + NoLegend() + ggtitle("E14 Projected") + theme(aspect.ratio = 1) + ylim(-10,25) + xlim(-15,10)
+e14_b<- plot.statepred.composition(ref.hevin, query_e14.projected$query, labels.col = 'functional.cluster', metric = 'Percent')
+e14_c<- plot.statepred.composition(ref.hevin, query_e14.projected$query, labels.col = 'functional.cluster', metric = 'Count')
+
+p4_5 <- plot.projection(ref=ref.hevin, query = query_p4_5.projected$query, linesize =0.25, pointsize=0.1) + NoLegend() + ggtitle("P4/5 Projected") + theme(aspect.ratio = 1) + ylim(-10,25) + xlim(-15,10)
+p4_5_b<- plot.statepred.composition(ref.hevin, query_p4_5.projected$query, labels.col = 'functional.cluster', metric = 'Percent')
+p4_5_c<- plot.statepred.composition(ref.hevin, query_p4_5.projected$query, labels.col = 'functional.cluster', metric = 'Count')
+
+p30 <- plot.projection(ref=ref.hevin, query = query_p30.projected$query, linesize =0.25, pointsize=0.1) + NoLegend() + ggtitle("P30 Projected") + theme(aspect.ratio = 1) + ylim(-10,25) + xlim(-15,10)
+p30_b<- plot.statepred.composition(ref.hevin, query_p30.projected$query, labels.col = 'functional.cluster', metric = 'Percent')
+p30_c<- plot.statepred.composition(ref.hevin, query_p30.projected$query, labels.col = 'functional.cluster', metric = 'Count')
+
+p100 <- plot.projection(ref=ref.hevin, query = query_p100.projected$query, linesize =0.25, pointsize=0.1) + NoLegend() + ggtitle("P100 Projected") + theme(aspect.ratio = 1) + ylim(-10,25) + xlim(-15,10)
+p100_b<- plot.statepred.composition(ref.hevin, query_p100.projected$query, labels.col = 'functional.cluster', metric = 'Percent')
+p100_c<- plot.statepred.composition(ref.hevin, query_p100.projected$query, labels.col = 'functional.cluster', metric = 'Count')
+
+old <- plot.projection(ref=ref.hevin, query = query_old.projected$query, linesize =0.25, pointsize=0.1) + NoLegend() + ggtitle(">P540 Projected") + theme(aspect.ratio = 1) + ylim(-10,25) + xlim(-15,10)
+old_b<- plot.statepred.composition(ref.hevin, query_old.projected$query, labels.col = 'functional.cluster', metric = 'Percent')
+old_c<- plot.statepred.composition(ref.hevin, query_old.projected$query, labels.col = 'functional.cluster', metric = 'Count')
+
+lpc
+lpc_b
+lpc_c
+
+sal
+sal_b
+sal_c
+
+
+e14
+e14_b
+e14_c
+
+p4_5
+p4_5_b
+p4_5_c
+
+p30
+p30_b
+p30_c
+
+p100
+p100_b
+p100_c
+
+old
+old_b
+old_c
+
+```
+
+```{r save RDS files for Hammond data}
+output = '/Volumes/Argonaut/Hevin_OE_SingleCell_RNAseq/Compare_Outside_Data/SCVI_Integrate_public_datasets_250124/ProjectTILs/Seurat_Output/'
+SaveSeuratRds(query_lpc.projected$query, file=paste(output,'Hammond_LPC.Rds',sep=''))
+SaveSeuratRds(query_sal.projected$query, file=paste(output,'Hammond_Saline.Rds',sep=''))
+
+SaveSeuratRds(query_e14.projected$query, file=paste(output,'Hammond_E14.Rds',sep=''))
+SaveSeuratRds(query_p4_5.projected$query, file=paste(output,'Hammond_P4_5.Rds',sep=''))
+SaveSeuratRds(query_p30.projected$query, file=paste(output,'Hammond_P30.Rds',sep=''))
+SaveSeuratRds(query_p100.projected$query, file=paste(output,'Hammond_P100.Rds',sep=''))
+SaveSeuratRds(query_old.projected$query, file=paste(output,'Hammond_Old.Rds',sep=''))
+
+```
+
+```{r save plots for Hammond data}
+img_out = '/Volumes/Argonaut/Hevin_OE_SingleCell_RNAseq/Compare_Outside_Data/SCVI_Integrate_public_datasets_250124/ProjectTILs/PNG_Output/'
+ggsave(filename=paste(img_out,'Hammond_LPC.png',sep=''), plot= lpc,device='png')
+ggsave(filename=paste(img_out,'Hammond_LPC_pct.png',sep=''), plot= lpc_b,device='png')
+ggsave(filename=paste(img_out,'Hammond_LPC_count.png',sep=''), plot= lpc_c,device='png')
+
+ggsave(filename=paste(img_out,'Hammond_Saline.png',sep=''), plot= sal,device='png')
+ggsave(filename=paste(img_out,'Hammond_Saline_pct.png',sep=''), plot= sal_b,device='png')
+ggsave(filename=paste(img_out,'Hammond_Saline_count.png',sep=''), plot= sal_c,device='png')
+
+
+ggsave(filename=paste(img_out,'Hammond_E14.png',sep=''), plot= e14,device='png')
+ggsave(filename=paste(img_out,'Hammond_E14_pct.png',sep=''), plot= e14_b,device='png')
+ggsave(filename=paste(img_out,'Hammond_E14_count.png',sep=''), plot= e14_c,device='png')
+
+ggsave(filename=paste(img_out,'Hammond_P4_5.png',sep=''), plot= p4_5,device='png')
+ggsave(filename=paste(img_out,'Hammond_P4_5_pct.png',sep=''), plot= p4_5_b,device='png')
+ggsave(filename=paste(img_out,'Hammond_P4_5_count.png',sep=''), plot= p4_5_c,device='png')
+
+ggsave(filename=paste(img_out,'Hammond_P30.png',sep=''), plot= p30,device='png')
+ggsave(filename=paste(img_out,'Hammond_P30_pct.png',sep=''), plot= p30_b,device='png')
+ggsave(filename=paste(img_out,'Hammond_P30_count.png',sep=''), plot= p30_c,device='png')
+
+ggsave(filename=paste(img_out,'Hammond_P100.png',sep=''), plot= p100,device='png')
+ggsave(filename=paste(img_out,'Hammond_P100_pct.png',sep=''), plot= p100_b,device='png')
+ggsave(filename=paste(img_out,'Hammond_P100_count.png',sep=''), plot= p100_c,device='png')
+
+ggsave(filename=paste(img_out,'Hammond_Old.png',sep=''), plot= old,device='png')
+ggsave(filename=paste(img_out,'Hammond_Old_pct.png',sep=''), plot= old_b,device='png')
+ggsave(filename=paste(img_out,'Hammond_Old_count.png',sep=''), plot= old_c,device='png')
+```
+
+## Keren-Shaul et al. dataset
+
+```{r read in query data from Keren-Shaul et al.}
+
+query_ker_ad <- schard::h5ad2seurat(paste(directory,'Keren-Shaul_AD.h5ad',sep=''))
+query_ker_ad.projected <- Run.ProjecTILs(query_ker_ad, ref = ref.hevin, filter.cell = FALSE)
+
+query_ker_wt <- schard::h5ad2seurat(paste(directory,'Keren-Shaul_WT.h5ad',sep=''))
+query_ker_wt.projected <- Run.ProjecTILs(query_ker_wt, ref = ref.hevin, filter.cell = FALSE)
+
+```
+
+```{r map Keren-Shaul data onto reference}
+
+ker_ad <- plot.projection(ref=ref.hevin, query = query_ker_ad.projected$query, linesize =0.25, pointsize=0.1) + NoLegend() + ggtitle("5XFAD Projected") + theme(aspect.ratio = 1) + ylim(-10,25) + xlim(-15,10)
+ker_ad_b<- plot.statepred.composition(ref.hevin, query_ker_ad.projected$query, labels.col = 'functional.cluster', metric = 'Percent')
+ker_ad_c<- plot.statepred.composition(ref.hevin, query_ker_ad.projected$query, labels.col = 'functional.cluster', metric = 'Count')
+
+ker_wt <- plot.projection(ref=ref.hevin, query = query_ker_wt.projected$query, linesize =0.25, pointsize=0.1) + NoLegend() + ggtitle("WT Projected") + theme(aspect.ratio = 1) + ylim(-10,25) + xlim(-15,10)
+ker_wt_b<- plot.statepred.composition(ref.hevin, query_ker_wt.projected$query, labels.col = 'functional.cluster', metric = 'Percent')
+ker_wt_c<- plot.statepred.composition(ref.hevin, query_ker_wt.projected$query, labels.col = 'functional.cluster', metric = 'Count')
+
+ker_ad
+ker_ad_b
+ker_ad_c
+
+ker_wt
+ker_wt_b
+ker_wt_c
+
+```
+
+```{r save RDS files for Keren-Shaul data}
+output = '/Volumes/Argonaut/Hevin_OE_SingleCell_RNAseq/Compare_Outside_Data/SCVI_Integrate_public_datasets_250124/ProjectTILs/Seurat_Output/'
+SaveSeuratRds(query_ker_ad.projected$query, file=paste(output,'Keren-Shaul_AD.Rds',sep=''))
+SaveSeuratRds(query_ker_wt.projected$query, file=paste(output,'Keren-Shaul_WT.Rds',sep=''))
+```
+
+```{r save plots for Keren-Shaul data}
+img_out = '/Volumes/Argonaut/Hevin_OE_SingleCell_RNAseq/Compare_Outside_Data/SCVI_Integrate_public_datasets_250124/ProjectTILs/PNG_Output/'
+ggsave(filename=paste(img_out,'Keren-Shaul_AD.png',sep=''), plot= ker_ad,device='png')
+ggsave(filename=paste(img_out,'Keren-Shaul_AD_pct.png',sep=''), plot= ker_ad_b,device='png')
+ggsave(filename=paste(img_out,'Keren-Shaul_AD_count.png',sep=''), plot= ker_ad_c,device='png')
+
+ggsave(filename=paste(img_out,'Keren-Shaul_WT.png',sep=''), plot= ker_wt,device='png')
+ggsave(filename=paste(img_out,'Keren-Shaul_WT_pct.png',sep=''), plot= ker_wt_b,device='png')
+ggsave(filename=paste(img_out,'Keren-Shaul_WT_count.png',sep=''), plot= ker_wt_c,device='png')
+```
+
+## Zhou et al. dataset
+
+```{r read in query data from Zhou et al.}
+
+query_zho_wt <- schard::h5ad2seurat(paste(directory,'Zhou_WT.h5ad',sep=''))
+query_zho_wt.projected <- Run.ProjecTILs(query_zho_wt, ref = ref.hevin, filter.cell = FALSE)
+
+query_zho_ad <- schard::h5ad2seurat(paste(directory,'Zhou_AD.h5ad',sep=''))
+query_zho_ad.projected <- Run.ProjecTILs(query_zho_ad, ref = ref.hevin, filter.cell = FALSE)
+
+```
+
+```{r map Zhou data onto reference}
+
+zho_wt <- plot.projection(ref=ref.hevin, query = query_zho_wt.projected$query, linesize =0.25, pointsize=0.1) + NoLegend() + ggtitle("WT Projected") + theme(aspect.ratio = 1) + ylim(-10,25) + xlim(-15,10)
+zho_wt_b<- plot.statepred.composition(ref.hevin, query_zho_wt.projected$query, labels.col = 'functional.cluster', metric = 'Percent')
+zho_wt_c<- plot.statepred.composition(ref.hevin, query_zho_wt.projected$query, labels.col = 'functional.cluster', metric = 'Count')
+
+zho_ad <- plot.projection(ref=ref.hevin, query = query_zho_ad.projected$query, linesize =0.25, pointsize=0.1) + NoLegend() + ggtitle("5XFAD Projected") + theme(aspect.ratio = 1) + ylim(-10,25) + xlim(-15,10)
+zho_ad_b<- plot.statepred.composition(ref.hevin, query_zho_ad.projected$query, labels.col = 'functional.cluster', metric = 'Percent')
+zho_ad_c<- plot.statepred.composition(ref.hevin, query_zho_ad.projected$query, labels.col = 'functional.cluster', metric = 'Count')
+
+zho_wt
+zho_wt_b
+zho_wt_c
+
+zho_ad
+zho_ad_b
+zho_ad_c
+```
+
+```{r save RDS files for Zhou data}
+output = '/Volumes/Argonaut/Hevin_OE_SingleCell_RNAseq/Compare_Outside_Data/SCVI_Integrate_public_datasets_250124/ProjectTILs/Seurat_Output/'
+SaveSeuratRds(query_zho_wt.projected$query, file=paste(output,'Zhou_WT.Rds',sep=''))
+SaveSeuratRds(query_zho_ad.projected$query, file=paste(output,'Zhou_AD.Rds',sep=''))
+```
+
+```{r save plots for Zhou data}
+img_out = '/Volumes/Argonaut/Hevin_OE_SingleCell_RNAseq/Compare_Outside_Data/SCVI_Integrate_public_datasets_250124/ProjectTILs/PNG_Output/'
+ggsave(filename=paste(img_out,'Zhou_WT.png',sep=''), plot= zho_wt,device='png')
+ggsave(filename=paste(img_out,'Zhou_WT_pct.png',sep=''), plot= zho_wt_b,device='png')
+ggsave(filename=paste(img_out,'Zhou_WT_count.png',sep=''), plot= zho_wt_c,device='png')
+
+ggsave(filename=paste(img_out,'Zhou_AD.png',sep=''), plot= zho_ad,device='png')
+ggsave(filename=paste(img_out,'Zhou_AD_pct.png',sep=''), plot= zho_ad_b,device='png')
+ggsave(filename=paste(img_out,'Zhou_AD_count.png',sep=''), plot= zho_ad_c,device='png')
+```
+
+## Li et al. dataset
+
+```{r read in query data from Li et al.}
+
+query_li_pam <- schard::h5ad2seurat(paste(directory,'Li_pams.h5ad',sep=''))
+query_li_pam.projected <- Run.ProjecTILs(query_li_pam, ref = ref.hevin, filter.cell = FALSE)
+
+query_li_nonpam <- schard::h5ad2seurat(paste(directory,'Li_nonpams.h5ad',sep=''))
+query_li_nonpam.projected <- Run.ProjecTILs(query_li_nonpam, ref = ref.hevin, filter.cell = FALSE)
+
+```
+
+```{r map Li data onto reference}
+
+li_pam <- plot.projection(ref=ref.hevin, query = query_li_pam.projected$query, linesize =0.25, pointsize=0.1) + NoLegend() + ggtitle("PAMs Projected") + theme(aspect.ratio = 1) + ylim(-10,25) + xlim(-15,10) 
+li_pam_b<- plot.statepred.composition(ref.hevin, query_li_pam.projected$query, labels.col = 'functional.cluster', metric = 'Percent')
+li_pam_c<- plot.statepred.composition(ref.hevin, query_li_pam.projected$query, labels.col = 'functional.cluster', metric = 'Count')
+
+li_nonpam <- plot.projection(ref=ref.hevin, query = query_li_nonpam.projected$query, linesize =0.25, pointsize=0.1) + NoLegend() + ggtitle("Non-PAMs Projected") + theme(aspect.ratio = 1) + ylim(-10,25) + xlim(-15,10) 
+li_nonpam_b<- plot.statepred.composition(ref.hevin, query_li_nonpam.projected$query, labels.col = 'functional.cluster', metric = 'Percent')
+li_nonpam_c<- plot.statepred.composition(ref.hevin, query_li_nonpam.projected$query, labels.col = 'functional.cluster', metric = 'Count')
+
+li_pam 
+li_pam_b
+li_pam_c
+
+li_nonpam 
+li_nonpam_b
+li_nonpam_c
+```
+
+```{r save RDS files for Li data}
+output = '/Volumes/Argonaut/Hevin_OE_SingleCell_RNAseq/Compare_Outside_Data/SCVI_Integrate_public_datasets_250124/ProjectTILs/Seurat_Output/'
+SaveSeuratRds(query_li_pam.projected$query, file=paste(output,'Li_pams.Rds',sep=''))
+SaveSeuratRds(query_li_nonpam.projected$query, file=paste(output,'Li_nonpams.Rds',sep=''))
+```
+
+```{r save plots for Li data}
+img_out = '/Volumes/Argonaut/Hevin_OE_SingleCell_RNAseq/Compare_Outside_Data/SCVI_Integrate_public_datasets_250124/ProjectTILs/PNG_Output/'
+ggsave(filename=paste(img_out,'Li_pams.png',sep=''), plot= li_pam,device='png')
+ggsave(filename=paste(img_out,'Li_pams_pct.png',sep=''), plot= li_pam_b,device='png')
+ggsave(filename=paste(img_out,'Li_pams_count.png',sep=''), plot= li_pam_c,device='png')
+
+ggsave(filename=paste(img_out,'Li_nonpams.png',sep=''), plot= li_nonpam,device='png')
+ggsave(filename=paste(img_out,'Li_nonpams_pct.png',sep=''), plot= li_nonpam_b,device='png')
+ggsave(filename=paste(img_out,'Li_nonpams_count.png',sep=''), plot= li_nonpam_c,device='png')
+```
+
+```{r plot of reference map}
+DimPlot(ref.hevin, label = T, repel = T, label.size=4) + theme(aspect.ratio=1) + NoLegend() + ylim(-10,25) + xlim(-15,10)
+```
+
+## Hevin and mCherry OE conditions mapped back to reference
+
+```{r map Hevin and mCherry OE conditions back to reference}
+ref.hevin <- readRDS('E:/ProjecTILs_run_250204/Seurat_Output/Ramirez_reference.Rds')
+#ref.projected <- Run.ProjecTILs(ref.hevin, ref = ref.hevin, filter.cell = FALSE)
+
+hevin_oe <-  schard::h5ad2seurat('H:/Input_AnnData_Seurat/Ramirez_Hevin.h5ad')
+hevin_oe.projected <- Run.ProjecTILs(hevin_oe, ref = ref.hevin, filter.cell = FALSE)
+
+mcherry_oe <-  schard::h5ad2seurat('H:/Input_AnnData_Seurat/Ramirez_mCherry.h5ad')
+mcherry_oe.projected <- Run.ProjecTILs(mcherry_oe, ref = ref.hevin, filter.cell = FALSE)
+
+ref <- plot.projection(ref=ref.hevin, query = ref.hevin, linesize =0.25, pointsize=0.1) + NoLegend() + ggtitle("Clusters") + theme(aspect.ratio = 1) + ylim(-10,25) + xlim(-15,10)
+ref_b<- plot.statepred.composition(ref.hevin, ref.hevin, labels.col = 'functional.cluster', metric = 'Percent')
+ref_c<- plot.statepred.composition(ref.hevin, ref.hevin, labels.col = 'functional.cluster', metric = 'Count')
+ref_d<- DimPlot(ref.hevin, label = T, repel = T, label.size=4) + theme(aspect.ratio=1) + NoLegend() + ylim(-10,25) + xlim(-15,10)
+
+hevin <- plot.projection(ref=ref.hevin, query = hevin_oe.projected$query, linesize =0.25, pointsize=0.1) + NoLegend() + ggtitle("Hevin OE Projected") + theme(aspect.ratio = 1) + ylim(-10,25) + xlim(-15,10)
+hevin_b<- plot.statepred.composition(ref.hevin, hevin_oe.projected$query, labels.col = 'functional.cluster', metric = 'Percent')
+hevin_c<- plot.statepred.composition(ref.hevin, hevin_oe.projected$query, labels.col = 'functional.cluster', metric = 'Count')
+
+mcherry <- plot.projection(ref=ref.hevin, query = mcherry_oe.projected$query, linesize =0.25, pointsize=0.1) + NoLegend() + ggtitle("mCherry OE Projected") + theme(aspect.ratio = 1) + ylim(-10,25) + xlim(-15,10)
+mcherry_b<- plot.statepred.composition(ref.hevin, mcherry_oe.projected$query, labels.col = 'functional.cluster', metric = 'Percent')
+mcherry_c<- plot.statepred.composition(ref.hevin, mcherry_oe.projected$query, labels.col = 'functional.cluster', metric = 'Count')
+
+ref
+ref_b
+ref_c
+ref_d
+
+hevin
+hevin_b
+hevin_c
+
+mcherry
+mcherry_b
+mcherry_c
+```
+
+```{r save query and image files for Hevin and mCherry OE}
+output <- 'E:/ProjecTILs_run_250204/Seurat_Output/'
+SaveSeuratRds(hevin_oe.projected$query, file=paste(output,'Hevin_OE_250204.Rds',sep=''))
+SaveSeuratRds(mcherry_oe.projected$query, file=paste(output,'mCherry_OE_250204.Rds',sep=''))
+
+img_out <- output
+
+ggsave(filename=paste(img_out,'Ref_Clusters_projected.png',sep=''), plot= ref,device='png')
+ggsave(filename=paste(img_out,'Ref_Clusters.pdf',sep=''), plot= ref_d,device='pdf')
+ggsave(filename=paste(img_out,'Ref_Clusters_pct.png',sep=''), plot= ref_b,device='png')
+ggsave(filename=paste(img_out,'Ref_Clusters_count.png',sep=''), plot= ref_c,device='png')
+
+ggsave(filename=paste(img_out,'Hevin_OE_250204.png',sep=''), plot= hevin,device='png')
+ggsave(filename=paste(img_out,'Hevin_OE_250204_pct.png',sep=''), plot= hevin_b,device='png')
+ggsave(filename=paste(img_out,'Hevin_OE_250204_count.png',sep=''), plot= hevin_c,device='png')
+
+ggsave(filename=paste(img_out,'mCherry_OE_250204.png',sep=''), plot= mcherry,device='png')
+ggsave(filename=paste(img_out,'mCherry_OE_250204_pct.png',sep=''), plot= mcherry_b,device='png')
+ggsave(filename=paste(img_out,'mCherry_OE_250204_count.png',sep=''), plot= mcherry_c,device='png')
+```
+
+```{r plot genes of interest on reference umap}
+ref.hevin<- readRDS('/Volumes/Argonaut/Hevin_OE_SingleCell_RNAseq/Compare_Outside_Data/SCVI_Integrate_public_datasets_250124/ProjectTILs/Seurat_Output/Ramirez_reference.Rds')
+
+slc1a3 <- FeaturePlot(ref.hevin, features = "Slc1a3") + theme(aspect.ratio=1)   + ylim(-10,25) + xlim(-15,10)
+ccr2 <- FeaturePlot(ref.hevin, features = "Ccr2") + theme(aspect.ratio=1)   + ylim(-10,25) + xlim(-15,10)
+cldn5 <- FeaturePlot(ref.hevin, features = "Cldn5") + theme(aspect.ratio=1)   + ylim(-10,25) + xlim(-15,10)
+clec10a <- FeaturePlot(ref.hevin, features = "Clec10a") + theme(aspect.ratio=1)   + ylim(-10,25) + xlim(-15,10)
+
+itgam <- FeaturePlot(ref.hevin, features = "Itgam") + theme(aspect.ratio=1)   + ylim(-10,25) + xlim(-15,10)
+p2y12 <- FeaturePlot(ref.hevin, features = "P2ry12") + theme(aspect.ratio=1)   + ylim(-10,25) + xlim(-15,10)
+hexb <- FeaturePlot(ref.hevin, features = "Hexb") + theme(aspect.ratio=1)   + ylim(-10,25) + xlim(-15,10)
+cx3cr1 <- FeaturePlot(ref.hevin, features = "Cx3cr1") + theme(aspect.ratio=1)   + ylim(-10,25) + xlim(-15,10)
+tgfbr1 <- FeaturePlot(ref.hevin, features = "Tgfbr1") + theme(aspect.ratio=1)   + ylim(-10,25) + xlim(-15,10)
+tmem119 <- FeaturePlot(ref.hevin, features = "Tmem119") + theme(aspect.ratio=1)   + ylim(-10,25) + xlim(-15,10)
+
+tlr2 <- FeaturePlot(ref.hevin, features = "Tlr2") + theme(aspect.ratio=1)   + ylim(-10,25) + xlim(-15,10)
+tlr1 <- FeaturePlot(ref.hevin, features = "Tlr1") + theme(aspect.ratio=1)   + ylim(-10,25) + xlim(-15,10)
+ly96 <- FeaturePlot(ref.hevin, features = "Ly96") + theme(aspect.ratio=1)   + ylim(-10,25) + xlim(-15,10)
+cd14 <- FeaturePlot(ref.hevin, features = "Cd14") + theme(aspect.ratio=1)   + ylim(-10,25) + xlim(-15,10)
+tlr4 <- FeaturePlot(ref.hevin, features = "Tlr4") + theme(aspect.ratio=1)   + ylim(-10,25) + xlim(-15,10)
+```
+
+```{r save plots}
+export<-'/Volumes/Argonaut/Hevin_OE_SingleCell_RNAseq/Figure_Drafts/250204/figures/Seurat_UMAPs/'
+ggsave(filename=paste(export,"slc1a3.png"), plot= slc1a3,device='png')
+ggsave(filename=paste(export,"ccr2.png"), plot= ccr2,device='png')
+ggsave(filename=paste(export,"cldn5.png"), plot= cldn5,device='png')
+ggsave(filename=paste(export,"clec10a.png"), plot= clec10a,device='png')
+
+ggsave(filename=paste(export,"itgam.png"), plot= itgam,device='png')
+ggsave(filename=paste(export,"p2y12.png"), plot= p2y12,device='png')
+ggsave(filename=paste(export,"cx3cr1.png"), plot= cx3cr1,device='png')
+ggsave(filename=paste(export,"hexb.png"), plot= hexb,device='png')
+ggsave(filename=paste(export,"tgfbr1.png"), plot= tgfbr1,device='png')
+ggsave(filename=paste(export,"tmem119.png"), plot= tmem119,device='png')
+
+ggsave(filename=paste(export,"tlr2.png"), plot= tlr2,device='png')
+ggsave(filename=paste(export,"tlr1.png"), plot= tlr1,device='png')
+ggsave(filename=paste(export,"ly96.png"), plot= ly96,device='png')
+ggsave(filename=paste(export,"cd14.png"), plot= cd14,device='png')
+ggsave(filename=paste(export,"tlr4.png"), plot= tlr4,device='png')
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
