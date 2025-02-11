@@ -1,0 +1,105 @@
+---
+title: "Bioconductor_Post_ProjecTILs"
+author: "Juan"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r load libraries, message=FALSE}
+library(tidyverse)
+library(readr)
+library(org.Mm.eg.db)
+library(clusterProfiler)
+library(enrichplot)
+library(msigdbr)
+library(ggVennDiagram)
+library(biomaRt)
+```
+
+Want GO of positive LFC and adjusted pvalue < 0.05
+
+```{r load data}
+combined_data <- read.csv("/Volumes/Argonaut/Hevin_OE_SingleCell_RNAseq/Compare_Outside_Data/ProjecTILs/250109_scanpy_post_ProjecTILs/Wilcoxon_Post_ProjecTILs.csv")
+```
+
+```{r format data for GO and KEGG}
+wilcoxon_df <- data.frame(c(combined_data$X1_n))
+colnames(wilcoxon_df) <- c("genes")
+wilcoxon_df$log2FC <- c(combined_data$X1_l)
+wilcoxon_df$pval <- c(combined_data$X1_p)
+```
+
+```{r get ensembl IDs}
+# Get ENTREZ IDs
+# We'll need this for using the "org.Mm.eg.db" package
+# Step One: Connect to the selected BioMart database and dataset hosted by Ensembl
+ensembl <- useEnsembl(biomart = "genes", 
+                   dataset = "mmusculus_gene_ensembl")
+
+#ensembl <- useMart("ENSEMBL_MART_ENSEMBL", host="may2009.archive.ensembl.org", dataset="mmusculus_gene_ensembl")
+
+# Step Two: Retrieve gene names
+# build a biomaRt query
+# The getBM() function is the main query function in biomaRt
+
+
+ensembl_to_entrez <- getBM(attributes = c("ensembl_gene_id", "external_gene_name",
+                                            "entrezgene_id"),
+                             values = wilcoxon_df$genes,
+                             mart = ensembl)
+
+
+# add this new info to combined_data
+wilcoxon_df <- wilcoxon_df %>% 
+            left_join(ensembl_to_entrez, by = c("genes" = "external_gene_name"))
+
+# remove rows with NAs in the columns in `ensembl_gene_id``
+wilcoxon_df <- wilcoxon_df %>% 
+            drop_na(ensembl_gene_id)
+
+# are all ensembl IDs unique?
+length(unique(wilcoxon_df$ensembl_gene_id)) 
+nrow(wilcoxon_df)
+
+# drop duplicates
+wilcoxon_df <- wilcoxon_df %>% 
+            distinct(ensembl_gene_id, .keep_all = TRUE)
+
+# are all ensembl IDs unique?
+length(unique(wilcoxon_df$ensembl_gene_id)) == nrow(wilcoxon_df) # TRUE
+
+```
+
+```{r create background for GO}
+
+background_df <- data.frame(c(wilcoxon_df$genes))
+background_df$ensembl_gene_id <- c(wilcoxon_df$ensembl_gene_id)
+background_df$entrezgene_id <- c(wilcoxon_df$entrezgene_id)
+
+```
+
+```{r cluster 1 enriched genes}
+cluster1 <- filter(wilcoxon_df, log2FC > 0)
+cluster1 <- filter(cluster1, pval < 0.05)
+
+write.csv(cluster1, '/Volumes/Argonaut/Hevin_OE_SingleCell_RNAseq/Compare_Outside_Data/ProjecTILs/Bioconductor_Post_ProjecTILs/Cluster1_Wilcoxon_PostProjecTILs.csv')
+```
+
+```{r}
+options(enrichplot.colours = c("red","blue"))
+
+cluster1_kegg <- enrichKEGG(gene=as.character(cluster1$entrezgene_id), organism="mmu", pvalueCutoff=0.05, keyType="ncbi-geneid", use_internal_data = F) # maps gene IDs to gene names
+
+cluster1_kegg@result$Description <- gsub(pattern = " - Mus musculus (house mouse)", replacement = "", cluster1_kegg@result$Description, fixed = T)
+
+cluster1_kegg_order <- cluster1_kegg
+cluster1_kegg_order@result <- cluster1_kegg_order@result[order(cluster1_kegg_order@result$zScore, decreasing = TRUE),]
+
+cluster1_kegg_order %>% 
+  dotplot(showCategory = 10) + 
+  ggtitle("KEGG upregulated Cluster 1")
+```
