@@ -100,6 +100,6 @@ cluster1_kegg_order <- cluster1_kegg
 cluster1_kegg_order@result <- cluster1_kegg_order@result[order(cluster1_kegg_order@result$zScore, decreasing = TRUE),]
 
 cluster1_kegg_order %>% 
-  dotplot(showCategory = 10) + 
+  dotplot(showCategory = 12) + 
   ggtitle("KEGG: Cluster 1 enriched")
 ```
